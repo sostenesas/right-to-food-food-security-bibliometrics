@@ -1,0 +1,16 @@
+# R
+.Rhistory
+.RData
+.Rproj.user/
+
+# Data
+data/bronze/
+data/silver/
+data/gold/
+
+# Outputs
+outputs/figures/
+outputs/tables/
+
+# OS
+Thumbs.db
