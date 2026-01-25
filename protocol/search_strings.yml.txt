@@ -1,0 +1,39 @@
+project:
+  name: "Right to Food & Food Security Bibliometrics"
+  version: "v1.0"
+  created: "2026-01-25"
+
+core_concepts:
+  right_to_food:
+    - '"right to food"'
+    - '"right to adequate food"'
+    - '"human right to food"'
+    - '"right to adequate nutrition"'
+
+  food_security:
+    - '"food security"'
+    - '"food insecurity"'
+    - '"nutrition security"'
+
+languages:
+  portuguese:
+    - '"direito à alimentação"'
+    - '"direito humano à alimentação adequada"'
+    - '"segurança alimentar"'
+    - '"insegurança alimentar"'
+
+  spanish:
+    - '"derecho a la alimentación"'
+    - '"seguridad alimentaria"'
+    - '"inseguridad alimentaria"'
+
+  french:
+    - '"droit à l’alimentation"'
+    - '"sécurité alimentaire"'
+
+filters:
+  publication_year:
+    from: 1990
+    to: 2026
+  languages:
+    include: [en, pt, es, fr]
