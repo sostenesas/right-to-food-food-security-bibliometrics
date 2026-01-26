@@ -15,3 +15,14 @@ outputs/tables/
 
 # OS
 Thumbs.db
+
+# targets cache
+_targets/
+
+# Data
+data/bronze/
+data/silver/
+data/gold/
+data/external/
+data/dictionaries/
+
