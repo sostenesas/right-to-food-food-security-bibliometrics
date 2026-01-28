@@ -1,49 +1,71 @@
 # R/R/openalex_fetch.R
 
-fetch_openalex_bronze <- function(query, out_dir, max_pages = 5, per_page = 200) {
+fetch_openalex_bronze <- function(filter_string,
+                                  out_dir = "data/bronze",
+                                  per_page = 200,
+                                  max_pages = 20,
+                                  select_fields = c(
+                                    "id","doi","title","display_name",
+                                    "publication_year","publication_date","type",
+                                    "cited_by_count","language",
+                                    "primary_location","open_access",
+                                    "authorships","concepts","referenced_works",
+                                    "abstract_inverted_index"
+                                  ),
+                                  polite_email = Sys.getenv("OPENALEX_EMAIL", "")) {
+  
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-  stamp <- format(Sys.Date(), "%Y-%m-%d")
-  out_file <- file.path(out_dir, paste0("openalex_bronze_", stamp, ".jsonl"))
   
-  base <- "https://api.openalex.org/works"
+  base_url <- "https://api.openalex.org/works"
   cursor <- "*"
-  n_pages <- 0
+  page <- 0
   
-  con <- file(out_file, open = "wt", encoding = "UTF-8")
+  stamp <- format(Sys.time(), "%Y-%m-%d_%H%M%S")
+  out_path <- file.path(out_dir, paste0("openalex_bronze_", stamp, ".jsonl"))
+  
+  con <- file(out_path, open = "wt", encoding = "UTF-8")
   on.exit(close(con), add = TRUE)
   
-  message("Fetching OpenAlex (bronze) ...")
+  select_param <- paste(select_fields, collapse = ",")
+  
   repeat {
-    n_pages <- n_pages + 1
-    if (n_pages > max_pages) break
+    page <- page + 1
+    if (!is.null(max_pages) && page > max_pages) break
     
-    resp <- httr::GET(
-      url = base,
-      query = list(
-        search = query,
-        `per-page` = per_page,
-        cursor = cursor
-        # mailto = "seu_email@dominio.com"  # opcional, recomendado
-      ),
-      httr::timeout(60)
+    url <- paste0(
+      base_url,
+      "?filter=", URLencode(filter_string, reserved = TRUE),
+      "&select=", URLencode(select_param, reserved = TRUE),
+      "&per-page=", per_page,
+      "&cursor=", URLencode(cursor, reserved = TRUE)
     )
-    httr::stop_for_status(resp)
     
-    dat <- httr::content(resp, as = "text", encoding = "UTF-8")
-    json <- jsonlite::fromJSON(dat, simplifyVector = FALSE)
+    ua <- httr::user_agent("right-to-food-food-security-bibliometrics/0.1")
+    headers <- if (nzchar(polite_email)) httr::add_headers("mailto" = polite_email) else NULL
     
-    results <- json$results
-    if (length(results) == 0) break
-    
-    for (item in results) {
-      writeLines(jsonlite::toJSON(item, auto_unbox = TRUE), con)
+    resp <- httr::GET(url, ua, headers)
+    if (httr::status_code(resp) != 200) {
+      stop(
+        "OpenAlex HTTP ", httr::status_code(resp),
+        "\nURL:\n", url,
+        "\nBody:\n", httr::content(resp, "text", encoding = "UTF-8")
+      )
     }
     
-    cursor <- json$meta$next_cursor
-    if (is.null(cursor) || cursor == "") break
-    Sys.sleep(0.3)
+    payload <- httr::content(resp, as = "parsed", simplifyVector = FALSE)
+    results <- payload$results
+    if (is.null(results) || length(results) == 0) break
+    
+    for (r in results) {
+      writeLines(jsonlite::toJSON(r, auto_unbox = TRUE, null = "null"), con = con, sep = "\n", useBytes = TRUE)
+    }
+    
+    next_cursor <- payload$meta$next_cursor
+    if (is.null(next_cursor) || !nzchar(next_cursor)) break
+    cursor <- next_cursor
+    
+    Sys.sleep(0.2)
   }
   
-  message("Saved bronze: ", out_file)
-  out_file
+  out_path
 }

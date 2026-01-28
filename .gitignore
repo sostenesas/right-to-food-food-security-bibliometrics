@@ -26,3 +26,7 @@ data/gold/
 data/external/
 data/dictionaries/
 
+
+# run logs
+outputs/logs/
+

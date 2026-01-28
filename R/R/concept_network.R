@@ -9,7 +9,26 @@ build_top_concepts <- function(silver_dir = "data/silver",
   
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
-  concepts <- arrow::read_parquet(file.path(silver_dir, "concepts.parquet"))
+  concepts_path <- file.path(silver_dir, "concepts.parquet")
+  if (!file.exists(concepts_path)) {
+    stop("concepts.parquet not found: ", concepts_path)
+  }
+  
+  concepts <- arrow::read_parquet(concepts_path)
+  
+  # Se vier vazio ou sem colunas esperadas, salva vazio e retorna.
+  needed <- c("concept_id","concept_name","concept_level","concept_score")
+  if (nrow(concepts) == 0 || !all(needed %in% names(concepts))) {
+    top <- dplyr::tibble(
+      concept_id = character(),
+      concept_name = character(),
+      concept_level = integer(),
+      n_works = integer()
+    )
+    out_path <- file.path(out_dir, "top_concepts.parquet")
+    arrow::write_parquet(top, out_path)
+    return(out_path)
+  }
   
   top <- concepts |>
     dplyr::filter(!is.na(concept_name)) |>
@@ -36,9 +55,8 @@ build_concept_cooccurrence <- function(silver_dir = "data/silver",
   
   # filtra só top conceitos
   concepts_f <- concepts |>
-    dplyr::semi_join(top, by = c("concept_id", "concept_name", "concept_level")) |>
-    dplyr::select(work_id, concept_id, concept_name) |>
-    dplyr::distinct()
+    dplyr::distinct(work_id, concept_id, concept_name) |>
+    dplyr::semi_join(dplyr::distinct(top, concept_id), by = "concept_id")
   
   # pares de conceitos por work (coocorrência)
   pairs <- concepts_f |>
@@ -60,8 +78,17 @@ cluster_concept_network <- function(edges_path = "data/gold/concept_cooccurrence
   
   edges <- arrow::read_parquet(edges_path)
   
+  nodes_path <- file.path(out_dir, "concept_network_nodes.parquet")
+  
+  # ✅ Se não há arestas, retorna nodes vazio e NÃO quebra o pipeline
   if (nrow(edges) == 0) {
-    stop("No edges in cooccurrence network. Try lowering min_edge_weight or increasing max_pages in OpenAlex fetch.")
+    empty_nodes <- dplyr::tibble(
+      concept_name = character(),
+      cluster = integer(),
+      degree = integer()
+    )
+    arrow::write_parquet(empty_nodes, nodes_path)
+    return(nodes_path)
   }
   
   g <- igraph::graph_from_data_frame(
@@ -73,7 +100,6 @@ cluster_concept_network <- function(edges_path = "data/gold/concept_cooccurrence
     directed = FALSE
   )
   
-  # comunidade Louvain (ponderada)
   cl <- igraph::cluster_louvain(g, weights = igraph::E(g)$weight)
   memb <- igraph::membership(cl)
   
@@ -83,9 +109,7 @@ cluster_concept_network <- function(edges_path = "data/gold/concept_cooccurrence
     degree = igraph::degree(g)
   )
   
-  nodes_path <- file.path(out_dir, "concept_network_nodes.parquet")
   arrow::write_parquet(nodes, nodes_path)
-  
   nodes_path
 }
 
@@ -96,6 +120,19 @@ plot_concept_network <- function(edges_path = "data/gold/concept_cooccurrence_ed
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   
   edges <- arrow::read_parquet(edges_path)
+  out_path <- file.path(out_dir, "fig_concept_network.png")
+  
+  # ✅ Se não há arestas, cria placeholder
+  if (nrow(edges) == 0) {
+    png(out_path, width = 1400, height = 900, res = 170)
+    par(mar = c(0, 0, 0, 0))
+    plot.new()
+    text(0.5, 0.55, "Concept co-occurrence network", cex = 1.6)
+    text(0.5, 0.45, "No edges available for this scenario.\nTry increasing max_pages or using topics/keywords network.", cex = 1.1)
+    dev.off()
+    return(out_path)
+  }
+  
   nodes <- arrow::read_parquet(nodes_path)
   
   g <- igraph::graph_from_data_frame(
@@ -107,29 +144,24 @@ plot_concept_network <- function(edges_path = "data/gold/concept_cooccurrence_ed
     directed = FALSE
   )
   
-  # layout
   set.seed(42)
   lay <- igraph::layout_with_fr(g)
   
-  # map clusters
-  cl_map <- setNames(nodes$cluster, nodes$concept_name)
-  vcl <- cl_map[igraph::V(g)$name]
+  cl_map <- if (nrow(nodes) > 0) setNames(nodes$cluster, nodes$concept_name) else NULL
+  vcl <- if (!is.null(cl_map)) cl_map[igraph::V(g)$name] else rep(0, igraph::vcount(g))
   vcl[is.na(vcl)] <- 0
   
-  # tamanhos por grau (suave)
   deg <- igraph::degree(g)
   vsize <- pmax(4, pmin(16, sqrt(deg) * 3))
   
-  out_path <- file.path(out_dir, "fig_concept_network.png")
   png(out_path, width = 1400, height = 1000, res = 170)
-  
   plot(
     g,
     layout = lay,
     vertex.label = igraph::V(g)$name,
     vertex.label.cex = 0.6,
     vertex.size = vsize,
-    vertex.color = as.factor(vcl),   # sem escolher cores manualmente (base R decide)
+    vertex.color = as.factor(vcl),
     edge.width = pmax(1, edges$weight / max(edges$weight) * 5),
     main = "Concept co-occurrence network (OpenAlex concepts)"
   )
